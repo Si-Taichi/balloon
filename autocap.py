@@ -33,6 +33,17 @@ def get_next_filename(directory, prefix="image", ext=".jpg"):
     next_num = max(numbers) + 1 if numbers else 1
     return os.path.join(directory, f"{prefix}{next_num}{ext}")
 
+def get_latest_file(directory, ext=".jpg"):
+    files = [
+        os.path.join(directory, f)
+        for f in os.listdir(directory)
+        if f.endswith(ext)
+    ]
+    if not files:
+        return None
+    return max(files, key=os.path.getmtime)
+
+
 save_directory = f'/cam/pictures'
 
 picam.configure(config)
@@ -42,35 +53,55 @@ picam.set_controls({'AfMode': controls.AfModeEnum.Continuous})
 
 print("Picam started.")
 
+capture_timer = time.time()
+
 try:
     while True:
-        jpg_path = get_next_filename(save_directory, "image", ".jpg")
-        picam.capture_file(jpg_path)
+        line_read = ser.readline()
+        if capture_timer > 60:
+            jpg_path = get_next_filename(save_directory, "image", ".jpg")
+            picam.capture_file(jpg_path)
 
-        # VVV   This one for webp use   VVV
+            ser.write("GG")
+            time.sleep(1)
+            line_gps = ser.readline()
+            if line_gps:
+                decoded_line = line_gps.decode('utf-8').strip()
+            gps_line = decoded_line.strip().split(',')
+            lat = gps_line[0]
+            lon = gps_line[1]
+            alt = gps_line[2]
+            t = time.localtime()
+            c = time.strftime("%H:%M:%S", t)
+            with open('image_log.txt', 'a') as l:
+                l.write(f"{jpg_path} saved at : {c}\nGPS position at : lat [{lat}], lon [{lon}], alt [{alt}]")
+            capture_timer = time.time()
+        if line_read.decode('utf-8').strip() == "PACKET_PLEASE":
+            latest_jpg = get_latest_file(save_directory, ".jpg")
+            if latest_jpg is None:
+                print("No JPG available yet")
+                continue
 
-        # webp_path = get_next_filename(save_directory, "image", ".webp")
-        # frame = picam.capture_array()
-        # small = cv2.resize(frame, (240, 240))
-        # cv2.imwrite(webp_path, small)
-        # img = Image.open(webp_path)
-        # img.save(webp_path, 'webp', quality=25)
+            webp_path = get_next_filename(save_directory, "image", ".webp")
+            img = cv2.imread(latest_jpg)
+            if img is None:
+                print("Failed to load JPG")
+                continue
+            small = cv2.resize(img, (240, 240), interpolation=cv2.INTER_AREA)
+            pil_img = Image.fromarray(cv2.cvtColor(small, cv2.COLOR_BGR2RGB))
+            pil_img.save(webp_path, "WEBP", quality=25)
 
-        ser.write("GG")
-        time.sleep(1)
-        line_bytes = ser.readline()
-        if line_bytes:
-            decoded_line = line_bytes.decode('utf-8').rstrip()
-        gps_line = decoded_line.strip().split(',')
-        lat = gps_line[0]
-        lon = gps_line[1]
-        t = time.localtime()
-        c = time.strftime("%H:%M:%S", t)
-        with open('image_log.txt', 'a') as l:
-            l.write(f"Image saved at : {c}\nGPS position at : lat [{lat}], lon [{lon}]")        
-        time.sleep(60)
+            t = time.localtime()
+            c = time.strftime("%H:%M:%S", t)
+            with open('image_log.txt', 'a') as l:
+                l.write(f"{webp_path} generated from {latest_jpg} at {c}\n")
+            with open(webp_path, 'rb') as f:
+                data = f.read()
+            ser.write(data)
+            with open('image_log.txt', 'a') as l:
+                l.write(f"{webp_path} bytes sent: {len(data)}\n")
+        
 
 except Exception as e:
-    print(f"An error occred {e}")
-
+    print(f"An error occurred {e}")
 picam.stop()
