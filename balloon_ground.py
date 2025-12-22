@@ -34,7 +34,7 @@ def log(message):
         t.write(f"[{timestamp}] {message}")
 
 def serial_worker(port):
-    global ser, running, image_data, frame_count_local, packet, pack_size, apogee, packets_received, current_image, connection_status
+    global ser, running, image_data, frame_count_local, packet, pack_size, apogee, packets_received, current_image, connection_status, frame_count
 
     while running:
         try:
@@ -78,8 +78,8 @@ def serial_worker(port):
 
                 if header == "FC":
                     new_frame = int(data)
-                    if frame_count_local != new_frame:
-                        frame_count_local = new_frame
+                    if frame_count != new_frame:
+                        frame_count = new_frame
                         save_and_display_image()
                 elif header == "PS":
                     pack_size = int(data)
@@ -123,7 +123,7 @@ def save_and_display_image():
         filename = f"frame_{frame_count_local}.webp"
         with open(filename, "wb") as f:
             f.write(byte_data)
-
+        frame_count_local += 1
         current_image = base64.b64encode(byte_data).decode()
         
         log(f"✓ Saved: {filename} ({len(byte_data)/1024:.1f} KB)")
