@@ -1,7 +1,6 @@
 import serial
 import time
 import threading
-import os
 import base64
 from datetime import datetime
 from collections import deque
@@ -9,7 +8,8 @@ import traceback
 
 from dash import Dash, html, dcc, Input, Output, State, callback_context
 import dash_bootstrap_components as dbc
-import plotly.graph_objs as go
+
+
 
 image_data = {}
 frame_count = 0
@@ -18,6 +18,7 @@ pack_size = 0
 apogee = False
 ser = None
 running = False
+frame_count_local = 1
 
 packets_received = 0
 telemetry_log = deque(maxlen=500)
@@ -29,26 +30,25 @@ connection_status = "Disconnected"
 def log(message):
     timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
     telemetry_log.append(f"[{timestamp}] {message}")
-    with open("log.txt", "a") as f:
-        f.write(f"[{timestamp}] {message}\n")
+    with open("log.txt", "a", encoding="utf-8") as t:
+        t.write(f"[{timestamp}] {message}")
 
 def serial_worker(port):
-    global ser, running, image_data, frame_count, packet, pack_size, apogee
-    global packets_received, current_image, connection_status
-    
+    global ser, running, image_data, frame_count_local, packet, pack_size, apogee, packets_received, current_image, connection_status
+
     while running:
         try:
             ser = serial.Serial(port=port, baudrate=115200, timeout=1)
             ser.reset_input_buffer()
             connection_status = "Connected"
-            log(f"✓ Connected to {port}")
+            log(f"✓ Connected to {port}\n")
             break
         except Exception as e:
-            log(f"✗ Failed to open {port}: {e}")
+            log(f"✗ Failed to open {port}: {e}\n")
             time.sleep(2)
             if not running:
                 return
-    
+            
     try:
         while running:
             if ser.in_waiting > 0:
@@ -75,11 +75,11 @@ def serial_worker(port):
                     except:
                         header = "XX"
                         data = line
-                
+
                 if header == "FC":
                     new_frame = int(data)
-                    if frame_count != new_frame:
-                        frame_count = new_frame
+                    if frame_count_local != new_frame:
+                        frame_count_local = new_frame
                         save_and_display_image()
                 elif header == "PS":
                     pack_size = int(data)
@@ -94,11 +94,12 @@ def serial_worker(port):
                     image_data[int(data)] = packet
                 elif header == "RS":
                     try:
-                        rssi_value = int(data)
+                        rssi_value = float(data)
                         rssi_history.append(rssi_value)
                         time_history.append(datetime.now())
-                    except:
-                        pass
+                    except Exception as e:
+                        log(f"Error: {e}")
+                        traceback.print_exc()
                 
                 packets_received += 1
                 
@@ -112,26 +113,22 @@ def serial_worker(port):
         connection_status = "Disconnected"
 
 def save_and_display_image():
-    global image_data, frame_count, current_image
-    
+    global image_data, frame_count_local, current_image
     if not image_data:
         return
     
     try:
         byte_data = b"".join(image_data.values())
-        
-        filename = f"frame_{frame_count}.webp"
-        path = os.path.join("img/", filename)
-        with open(path, "wb") as f:
+
+        filename = f"frame_{frame_count_local}.webp"
+        with open(filename, "wb") as f:
             f.write(byte_data)
-        
+
         current_image = base64.b64encode(byte_data).decode()
         
         log(f"✓ Saved: {filename} ({len(byte_data)/1024:.1f} KB)")
-        
+        image_data = {}  
 
-        image_data = {}
-        
     except Exception as e:
         log(f"Error processing image: {e}")
 
@@ -139,20 +136,20 @@ app = Dash(__name__, external_stylesheets=[dbc.themes.DARKLY])
 
 app.layout = dbc.Container([
     dcc.Interval(id='interval-component', interval=1000, n_intervals=0),
-    
+
     dbc.Row([
         dbc.Col([
             html.H1("🎈 Balloon Ground Station", className="text-center mb-4")
         ])
     ]),
-    
+
     dbc.Card([
         dbc.CardBody([
             dbc.Row([
                 dbc.Col([
                     dbc.InputGroup([
                         dbc.InputGroupText("COM Port"),
-                        dbc.Input(id="port-input", value="COM4", type="text"),
+                        dbc.Input(id="port-input", value="COM11", type="text"),
                     ], className="mb-2"),
                 ], width=3),
                 dbc.Col([
@@ -176,7 +173,7 @@ app.layout = dbc.Container([
     dbc.Row([
         dbc.Col([
             dbc.Card([
-                dbc.CardHeader(html.H4("📷 Live Image Feed")),
+                dbc.CardHeader(html.H4("📷 Latest image")),
                 dbc.CardBody([
                     html.Div(id="image-display", style={"textAlign": "center", "minHeight": "400px"}),
                     html.Hr(),
@@ -184,19 +181,21 @@ app.layout = dbc.Container([
                 ])
             ])
         ], width=8),
-        
         dbc.Col([
             dbc.Card([
                 dbc.CardHeader(html.H5("📡 Signal Strength (RSSI)")),
                 dbc.CardBody([
-                    dcc.Graph(id="rssi-graph", config={'displayModeBar': False})
+                    html.Div(id="rssi-display", style={
+                        "textAlign": "center",
+                        "padding": "30px"
+                    })
                 ])
             ], className="mb-3"),
-            
+
             dbc.Card([
                 dbc.CardHeader(html.H5("📋 Telemetry Log")),
                 dbc.CardBody([
-                    html.Div(id="telemetry-log", style={
+                    html.Div(id="telemetry-log", **{"data-dummy": ""}, style={
                         "maxHeight": "300px",
                         "overflowY": "scroll",
                         "fontFamily": "monospace",
@@ -233,6 +232,7 @@ def handle_connection(connect_clicks, disconnect_clicks, port):
         running = True
         serial_thread = threading.Thread(target=serial_worker, args=(port,), daemon=True)
         serial_thread.start()
+        log("Connecting...")
         return True, False
     elif button_id == "disconnect-btn" and running:
         running = False
@@ -250,28 +250,28 @@ def handle_connection(connect_clicks, disconnect_clicks, port):
     Output("image-display", "children"),
     Output("image-info", "children"),
     Output("telemetry-log", "children"),
-    Output("rssi-graph", "figure"),
+    Output("rssi-display", "children"),
     Input("interval-component", "n_intervals")
 )
+
 def update_dashboard(n):
-    global connection_status, packets_received, frame_count, current_image
-    
+    global connection_status, packets_received, frame_count_local, current_image
+
     if connection_status == "Connected":
         status = html.Span("● Connected", style={"color": "#00ff00"})
         status_class = "mb-0"
     else:
         status = html.Span("● Disconnected", style={"color": "#ff4444"})
         status_class = "mb-0"
-    
-    stats = f"Packets: {packets_received} | Frame: {frame_count}"
-    
+
+    stats = f"Packets: {packets_received} | Frame: {frame_count_local}"
 
     if current_image:
         image_display = html.Img(
             src=f"data:image/webp;base64,{current_image}",
             style={"maxWidth": "100%", "maxHeight": "500px", "borderRadius": "5px"}
         )
-        image_info = f"Frame #{frame_count} | {len(base64.b64decode(current_image))/1024:.1f} KB"
+        image_info = f"Frame #{frame_count_local} | {len(base64.b64decode(current_image))/1024:.1f} KB"
     else:
         image_display = html.Div(
             "No image received yet",
@@ -280,48 +280,58 @@ def update_dashboard(n):
         image_info = "Waiting for data..."
 
     log_entries = [html.Div(entry, style={"color": "#00ff00"}) for entry in list(telemetry_log)]
-    
+
     if len(rssi_history) > 0:
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=list(range(len(rssi_history))),
-            y=list(rssi_history),
-            mode='lines',
-            line=dict(color='#00ff00', width=2),
-            fill='tozeroy',
-            fillcolor='rgba(0, 255, 0, 0.1)'
-        ))
-        fig.update_layout(
-            margin=dict(l=20, r=20, t=20, b=20),
-            paper_bgcolor='#1a1a1a',
-            plot_bgcolor='#1a1a1a',
-            font=dict(color='#ffffff'),
-            xaxis=dict(showgrid=False, title="Time"),
-            yaxis=dict(showgrid=True, gridcolor='#333', title="RSSI (dBm)"),
-            height=200
-        )
+        current_rssi = rssi_history[-1]
+        # Color based on signal strength
+        if current_rssi > -70:
+            rssi_color = "#00ff00"  # Green - excellent
+        elif current_rssi > -85:
+            rssi_color = "#ffaa00"  # Orange - good
+        else:
+            rssi_color = "#ff4444"  # Red - weak
+        
+        rssi_display = html.Div([
+            html.Div(f"{current_rssi}", style={
+                "fontSize": "48px", 
+                "fontWeight": "bold",
+                "color": rssi_color
+            }),
+            html.Div("dBm", style={
+                "fontSize": "20px", 
+                "color": "#aaa", 
+                "marginTop": "10px"
+            })
+        ])
     else:
-        fig = go.Figure()
-        fig.update_layout(
-            margin=dict(l=20, r=20, t=20, b=20),
-            paper_bgcolor='#1a1a1a',
-            plot_bgcolor='#1a1a1a',
-            font=dict(color='#666'),
-            xaxis=dict(showgrid=False),
-            yaxis=dict(showgrid=False),
-            height=200,
-            annotations=[{
-                'text': 'No RSSI data',
-                'xref': 'paper',
-                'yref': 'paper',
-                'showarrow': False,
-                'font': {'size': 14, 'color': '#666'}
-            }]
-        )
+        rssi_display = html.Div([
+            html.Div("--", style={
+                "fontSize": "48px", 
+                "fontWeight": "bold",
+                "color": "#666"
+            }),
+            html.Div("No signal data", style={
+                "fontSize": "14px", 
+                "color": "#666", 
+                "marginTop": "10px"
+            })
+        ])
     
-    return status, status_class, stats, image_display, image_info, log_entries, fig
+    return status, status_class, stats, image_display, image_info, log_entries, rssi_display
 
 if __name__ == "__main__":
-    print("Starting...")
-    print("📡 Open http://localhost:8050")
-    app.run(debug=True, host='0.0.0.0', port=8050, use_reloader=False)
+    app.clientside_callback(
+        """
+        function(children) {
+            const logDiv = document.getElementById("telemetry-log");
+            if (logDiv) {
+                logDiv.scrollTop = logDiv.scrollHeight;
+            }
+            return "";
+        }
+        """,
+        Output("telemetry-log", "data-dummy"),
+        Input("telemetry-log", "children")
+    )
+
+    app.run(debug=True, host='0.0.0.0', port=8050, use_reloader = False)
