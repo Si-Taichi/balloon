@@ -100,9 +100,11 @@ def serial_worker(port):
                     except Exception as e:
                         log(f"Error: {e}")
                         traceback.print_exc()
-                
+                else :
+                    print(f"raw : {line}")
+
                 packets_received += 1
-                
+
     except Exception as e:
         log(f"Error: {e}")
         traceback.print_exc()
@@ -264,7 +266,7 @@ def update_dashboard(n):
         status = html.Span("● Disconnected", style={"color": "#ff4444"})
         status_class = "mb-0"
 
-    stats = f"Packets: {packets_received} | Frame: {frame_count_local}"
+    stats = f"Packets: {packets_received} | Frame: {frame_count_local - 1}"
 
     if current_image:
         image_display = html.Img(
