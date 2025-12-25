@@ -74,6 +74,7 @@ def get_best_data(header, port_name):
     time1 = buffer['time1']
     time2 = buffer['time2']
     
+    # If both ports have data, prefer the most recent one
     if port1_data is not None and port2_data is not None:
         if time1 >= time2:
             log(f"Using data from Port1 (both available, Port1 newer)")
@@ -81,6 +82,7 @@ def get_best_data(header, port_name):
         else:
             log(f"Using data from Port2 (both available, Port2 newer)")
             return port2_data
+    # Fallback to whichever port has data
     elif port1_data is not None:
         log(f"Using data from Port1 (Port2 unavailable)")
         return port1_data
@@ -91,6 +93,7 @@ def get_best_data(header, port_name):
     return None
 
 def update_data_buffer(header, data, port_num):
+    """Update the data buffer with new data from a port"""
     if header not in data_buffer:
         data_buffer[header] = {'port1': None, 'port2': None, 'time1': None, 'time2': None}
     
@@ -160,6 +163,7 @@ def serial_worker(port, port_num):
                         header = "XX"
                         data = line
 
+                # Update buffer for this port
                 update_data_buffer(header, data, port_num)
 
                 if header == "FC":
@@ -216,7 +220,7 @@ def serial_worker(port, port_num):
                     except Exception as e:
                         log(f"Port{port_num} GPS Error: {e}")
                 else:
-                    print(f"Port{port_num} raw: header : {header}, data : {data}")
+                    print(f"Port{port_num} raw: {line}")
 
                 if port_num == 1:
                     packets_received_port1 += 1
@@ -251,7 +255,7 @@ def save_and_display_image():
         current_image = base64.b64encode(byte_data).decode()
         
         log(f"✓ Saved: {filename} ({len(byte_data)/1024:.1f} KB)")
-        log_image_bytes("SAVE", byte_data, 0)
+        log_image_bytes("SAVE", byte_data, 0)  # Port 0 indicates saved image
         
         frame_count_local += 1
         image_data = {}  
@@ -270,6 +274,7 @@ app.layout = dbc.Container([
         ])
     ]),
 
+    # Port 1 Controls
     dbc.Card([
         dbc.CardHeader(html.H5("🔌 Port 1 Connection")),
         dbc.CardBody([
@@ -298,6 +303,7 @@ app.layout = dbc.Container([
         ])
     ], className="mb-3"),
 
+    # Port 2 Controls
     dbc.Card([
         dbc.CardHeader(html.H5("🔌 Port 2 Connection")),
         dbc.CardBody([
@@ -327,6 +333,7 @@ app.layout = dbc.Container([
     ], className="mb-4"),
     
     dbc.Row([
+        # Left Column - Image
         dbc.Col([
             dbc.Card([
                 dbc.CardHeader(html.H4("📷 Latest Image")),
@@ -336,7 +343,8 @@ app.layout = dbc.Container([
                     html.Div(id="image-info", className="text-center text-muted")
                 ])
             ], className="mb-3"),
-
+            
+            # GPS Map
             dbc.Card([
                 dbc.CardHeader(html.H4("🗺️ GPS Location")),
                 dbc.CardBody([
@@ -354,7 +362,8 @@ app.layout = dbc.Container([
                 ])
             ])
         ], width=8),
-
+        
+        # Right Column - Telemetry
         dbc.Col([
             dbc.Card([
                 dbc.CardHeader(html.H5("📡 Port 1 Signal (RSSI)")),
@@ -478,6 +487,7 @@ def update_dashboard(n):
     global connection_status_port1, connection_status_port2, packets_received_port1, packets_received_port2
     global frame_count_local, current_image, current_lat, current_lon, current_alt
 
+    # Port 1 Status
     if connection_status_port1 == "Connected":
         status1 = html.Span("● Connected", style={"color": "#00ff00"})
         status1_class = "mb-0"
@@ -487,6 +497,7 @@ def update_dashboard(n):
 
     stats1 = f"Packets: {packets_received_port1}"
 
+    # Port 2 Status
     if connection_status_port2 == "Connected":
         status2 = html.Span("● Connected", style={"color": "#00ff00"})
         status2_class = "mb-0"
@@ -496,6 +507,7 @@ def update_dashboard(n):
 
     stats2 = f"Packets: {packets_received_port2}"
 
+    # Image Display
     if current_image:
         image_display = html.Img(
             src=f"data:image/webp;base64,{current_image}",
@@ -511,6 +523,7 @@ def update_dashboard(n):
 
     log_entries = [html.Div(entry, style={"color": "#00ff00"}) for entry in list(telemetry_log)]
 
+    # RSSI Display for Port 1
     if len(rssi_history_port1) > 0:
         current_rssi1 = rssi_history_port1[-1]
         if current_rssi1 > -70:
@@ -546,6 +559,7 @@ def update_dashboard(n):
             })
         ])
 
+    # RSSI Display for Port 2
     if len(rssi_history_port2) > 0:
         current_rssi2 = rssi_history_port2[-1]
         if current_rssi2 > -70:
@@ -583,14 +597,6 @@ def update_dashboard(n):
 
     # GPS Map and Info
     if current_lat is not None and current_lon is not None:
-        # Create path from GPS history
-        path_points = []
-        if len(gps_history) > 1:
-            for point in gps_history:
-                path_points.append(f"{{lat: {point['lat']}, lng: {point['lon']}}}")
-        
-        path_coordinates = ",".join(path_points) if path_points else ""
-        
         map_html = f"""
         <!DOCTYPE html>
         <html>
@@ -633,19 +639,6 @@ def update_dashboard(n):
                     marker.addListener("click", () => {{
                         infoWindow.open(map, marker);
                     }});
-                    
-                    // Draw path if available
-                    {f'''
-                    const pathCoordinates = [{path_coordinates}];
-                    const flightPath = new google.maps.Polyline({{
-                        path: pathCoordinates,
-                        geodesic: true,
-                        strokeColor: "#00FF00",
-                        strokeOpacity: 0.8,
-                        strokeWeight: 3
-                    }});
-                    flightPath.setMap(map);
-                    ''' if path_coordinates else ''}
                 }}
             </script>
             <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&callback=initMap" async defer></script>
@@ -653,7 +646,7 @@ def update_dashboard(n):
         </html>
         """
         
-        gps_info = f"📍 Lat: {current_lat:.6f} | Lon: {current_lon:.6f} | Alt: {current_alt:.1f}m"
+        gps_info = f"📍 Lat: {current_lat} | Lon: {current_lon} | Alt: {current_alt}m"
     else:
         map_html = """
         <!DOCTYPE html>
