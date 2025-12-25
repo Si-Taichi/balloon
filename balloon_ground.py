@@ -76,16 +76,16 @@ def get_best_data(header, port_name):
     
     if port1_data is not None and port2_data is not None:
         if time1 >= time2:
-            log(f"Using data from Port1 (both available, Port1 newer)")
+            log("Using data from Port1 (both available, Port1 newer)")
             return port1_data
         else:
-            log(f"Using data from Port2 (both available, Port2 newer)")
+            log("Using data from Port2 (both available, Port2 newer)")
             return port2_data
     elif port1_data is not None:
-        log(f"Using data from Port1 (Port2 unavailable)")
+        log("Using data from Port1 (Port2 unavailable)")
         return port1_data
     elif port2_data is not None:
-        log(f"Using data from Port2 (Port1 unavailable)")
+        log("Using data from Port2 (Port1 unavailable)")
         return port2_data
     
     return None
@@ -203,9 +203,9 @@ def serial_worker(port, port_num):
                         parts = data.split(',')
                         if len(parts) == 3:
                             lat, lon, alt = parts
-                            current_lat = float(lat)
-                            current_lon = float(lon)
-                            current_alt = float(alt)
+                            current_lat = lat
+                            current_lon = lon
+                            current_alt = alt
                             gps_history.append({
                                 'lat': current_lat,
                                 'lon': current_lon,
